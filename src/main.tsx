@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import Dexie, { type Table } from 'dexie'
 import './styles.css'
 import './blue.css'
+import './layout-fix.css'
 
 type ApiConfig = { id?: number; name: string; baseUrl: string; apiKey: string; model: string }
 type Message = { id?: number; role: 'user' | 'assistant'; content: string; createdAt: number }

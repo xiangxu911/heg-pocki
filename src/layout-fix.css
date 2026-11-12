@@ -1,0 +1,3 @@
+/* Mobile launcher layout: every swipe page occupies the full screen width. */
+.page-window{grid-column:1/-1;width:100%;}
+.page{grid-template-columns:repeat(4,minmax(0,1fr));}
