@@ -47,7 +47,7 @@ const emptyApi = (): ApiConfig => ({ id: uid(), name: 'OpenAI 兼容接口', bas
 
 function App() {
   const [active, setActive] = useState('home'); const [page, setPage] = useState(0); const [dragging, setDragging] = useState(false); const [dragOffset, setDragOffset] = useState(0); const startX = useRef(0); const pageWindowRef = useRef<HTMLDivElement>(null)
-  const pages = useMemo(() => Array.from({ length: Math.ceil(APP_REGISTRY.length / 8) }, (_, index) => APP_REGISTRY.slice(index * 8, index * 8 + 8)), [])
+  const pages = useMemo(() => { const pageSize = 12; return Array.from({ length: Math.ceil(APP_REGISTRY.length / pageSize) }, (_, index) => APP_REGISTRY.slice(index * pageSize, index * pageSize + pageSize)) }, [])
   const [messages, setMessages] = useState<RecordItem[]>(() => readJson('messages', [])); const [items, setItems] = useState<Record<string, RecordItem[]>>(() => Object.fromEntries(DATA_KEYS.filter(k => k !== 'messages').map(k => [k, readJson(k, [])])))
   const [contacts, setContacts] = useState<Contact[]>(() => readJson('Contacts', [])); const [apis, setApis] = useState<ApiConfig[]>(() => readJson('apis', [emptyApi()]))
   const [text, setText] = useState(''); const [busy, setBusy] = useState(false)
