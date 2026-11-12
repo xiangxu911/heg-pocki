@@ -1,39 +1,32 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import Dexie, { type Table } from 'dexie'
 import './styles.css'
-import './blue.css'
-import './layout-fix.css'
 
-type ApiConfig = { id?: number; name: string; baseUrl: string; apiKey: string; model: string }
-type Message = { id?: number; role: 'user' | 'assistant'; content: string; createdAt: number }
+type Item={id:number;title:string;body:string;createdAt:number}
+type ApiConfig={baseUrl:string;apiKey:string;model:string}
+const read=(key:string, fallback:Item[])=>{try{return JSON.parse(localStorage.getItem(key)||'null')||fallback}catch{return fallback}}
+const save=(key:string,value:unknown)=>localStorage.setItem(key,JSON.stringify(value))
+const apps=['Chat','Moments','Diary','Contacts','Gallery','Characters','Worldbook','Memory','Settings','API Manager']
+const labels:{[key:string]:string}={Moments:'动态',Diary:'日记',Contacts:'联系人',Gallery:'相册',Characters:'角色卡',Worldbook:'世界书',Memory:'记忆库','API Manager':'API 管理'}
 
-class HegDB extends Dexie {
-  apiConfigs!: Table<ApiConfig, number>
-  messages!: Table<Message, number>
-  constructor() { super('heg-pocki'); this.version(1).stores({ apiConfigs: '++id', messages: '++id,createdAt' }) }
+function App(){
+ const [active,setActive]=useState('home'); const [page,setPage]=useState(0); const [drag,setDrag]=useState(false); const startX=useRef(0)
+ const [messages,setMessages]=useState<Item[]>(()=>read('pocki-messages',[])); const [text,setText]=useState(''); const [busy,setBusy]=useState(false)
+ const [config,setConfig]=useState<ApiConfig>(()=>JSON.parse(localStorage.getItem('pocki-api')||'null')||{baseUrl:'https://api.openai.com/v1',apiKey:'',model:'gpt-4o-mini'})
+ const [items,setItems]=useState<Record<string,Item[]>>(()=>Object.fromEntries(['Moments','Diary','Contacts','Gallery','Characters','Worldbook','Memory'].map(k=>[k,read('pocki-'+k,[])])))
+ const pages=[apps.slice(0,8),apps.slice(8)];
+ const update=(key:string,list:Item[])=>{setItems(x=>({...x,[key]:list}));save('pocki-'+key,list)}
+ useEffect(()=>save('pocki-messages',messages),[messages])
+ async function send(){if(!text.trim()||busy)return;const user={id:Date.now(),title:'',body:text.trim(),createdAt:Date.now()};setMessages(x=>[...x,user]);setText('');setBusy(true);try{const r=await fetch(config.baseUrl.replace(/\/$/,'')+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.apiKey},body:JSON.stringify({model:config.model,messages:[...messages,user].map(m=>({role:m===user?'user':'assistant',content:m.body}))})});const d=await r.json();setMessages(x=>[...x,{id:Date.now()+1,title:'',body:d.choices?.[0]?.message?.content||'API 未返回内容',createdAt:Date.now()}])}catch(e){setMessages(x=>[...x,{id:Date.now()+1,title:'',body:e instanceof Error?e.message:'请求失败',createdAt:Date.now()}])}finally{setBusy(false)}}
+ const onStart=(e:React.TouchEvent)=>{startX.current=e.changedTouches[0].clientX;setDrag(true)}
+ const onEnd=(e:React.TouchEvent)=>{const dx=e.changedTouches[0].clientX-startX.current;setDrag(false);if(Math.abs(dx)>45)setPage(p=>Math.max(0,Math.min(pages.length-1,p+(dx<0?1:-1))))}
+ return <main className="stage"><div className="phone"><header><span>9:41</span><b>POCKI</b><span>▮▮ 5G ◉</span></header>{active==='home'?<><section className="desktop"><div className="widget"><strong>POCKI</strong><small>{new Date().toLocaleDateString()}</small></div><div className={'page-window '+(drag?'dragging':'')} onTouchStart={onStart} onTouchEnd={onEnd}><div className="page-track" style={{transform:`translate3d(-${page*100}%,0,0)`}}>{pages.map((list,i)=><div className="page" key={i}>{list.map(a=><button className="app-icon" key={a} onClick={()=>setActive(a)}><i>{a[0]}</i><span>{labels[a]||a}</span></button>)}</div>)}</div></div></section><div className="dock"><button onClick={()=>setActive('Chat')}>Chat</button><button onClick={()=>setActive('Diary')}>Diary</button><button onClick={()=>setActive('Settings')}>Settings</button></div></>:<AppView active={active} setActive={setActive} messages={messages} text={text} setText={setText} send={send} busy={busy} config={config} setConfig={setConfig} items={items} update={update}/>}<div className="home-indicator"/></div></main>
 }
-const db = new HegDB()
 
-async function callApi(config: ApiConfig, messages: Message[]) {
-  const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-    body: JSON.stringify({ model: config.model, messages: messages.map(({ role, content }) => ({ role, content })) })
-  })
-  if (!response.ok) throw new Error(`API 请求失败：${response.status}`)
-  const data = await response.json()
-  return data.choices?.[0]?.message?.content ?? 'API 未返回内容'
+function AppView(p:{active:string;setActive:(x:string)=>void;messages:Item[];text:string;setText:(x:string)=>void;send:()=>void;busy:boolean;config:ApiConfig;setConfig:(x:ApiConfig)=>void;items:Record<string,Item[]>;update:(k:string,x:Item[])=>void}){
+ const {active,setActive}=p; const [title,setTitle]=useState(''); const [body,setBody]=useState(''); const list=p.items[active]||[]; const name=labels[active]||active
+ const add=()=>{if(!title.trim()&&!body.trim())return; p.update(active,[...list,{id:Date.now(),title:title.trim()||name,body:body.trim(),createdAt:Date.now()}]);setTitle('');setBody('')}
+ const clear=()=>{if(confirm('清空本模块的本地记录？'))p.update(active,[])}
+ return <section className="app"><button className="back" onClick={()=>setActive('home')}>← 桌面</button><div className="app-heading"><div><small>POCKI MODULE</small><h2>{name}</h2></div>{!['Chat','API Manager','Settings'].includes(active)&&<button className="ghost" onClick={clear}>清空</button>}</div>{active==='Chat'&&<><div className="messages">{p.messages.map(m=><p key={m.id} className={m.title?'assistant':'user'}>{m.body}</p>)}</div><div className="composer"><input value={p.text} onChange={e=>p.setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&p.send()} placeholder="输入消息"/><button onClick={p.send}>{p.busy?'…':'发送'}</button></div></>}{active==='API Manager'&&<div className="form"><label>接口地址<input value={p.config.baseUrl} onChange={e=>p.setConfig({...p.config,baseUrl:e.target.value})}/></label><label>API Key<input type="password" value={p.config.apiKey} onChange={e=>p.setConfig({...p.config,apiKey:e.target.value})}/></label><label>模型<input value={p.config.model} onChange={e=>p.setConfig({...p.config,model:e.target.value})}/></label><button onClick={()=>{save('pocki-api',p.config);alert('API 配置已保存')}}>保存配置</button></div>}{active==='Settings'&&<div className="settings-card"><p>所有日记、动态和资料都只保存在当前浏览器。</p><button onClick={()=>{localStorage.clear();location.reload()}}>清除本地数据</button></div>}{!['Chat','API Manager','Settings'].includes(active)&&<><div className="add-form"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder={active==='Contacts'?'联系人名称':'标题'}/><textarea value={body} onChange={e=>setBody(e.target.value)} placeholder={active==='Gallery'?'图片链接或备注':'写点内容…'}/><button onClick={add}>＋ 添加{ name }</button></div><div className="record-list">{list.length===0?<div className="empty">还没有内容，先添加一条吧</div>:list.slice().reverse().map(x=><article key={x.id}><div><b>{x.title}</b><small>{new Date(x.createdAt).toLocaleString()}</small></div><p>{x.body||'暂无备注'}</p><button onClick={()=>p.update(active,list.filter(y=>y.id!==x.id))}>删除</button></article>)}</div></>}</section>
 }
-
-const apps = ['Chat','Moments','Diary','Contacts','Gallery','Characters','Worldbook','Memory','Settings','API Manager']
-function App() {
-  const [active, setActive] = useState('home'); const [page, setPage] = useState(0); const [messages, setMessages] = useState<Message[]>([])
-  const [text, setText] = useState(''); const [config, setConfig] = useState<ApiConfig>({name:'Default',baseUrl:'https://api.openai.com/v1',apiKey:'',model:'gpt-4o-mini'})
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { db.apiConfigs.toCollection().first().then(x => x && setConfig(x)); db.messages.orderBy('createdAt').toArray().then(setMessages) }, [])
-  async function send() { if (!text.trim() || busy) return; const user: Message={role:'user',content:text.trim(),createdAt:Date.now()}; const next=[...messages,user]; setMessages(next); setText(''); setBusy(true); await db.messages.add(user); try { const reply: Message={role:'assistant',content:await callApi(config,next),createdAt:Date.now()}; setMessages([...next,reply]); await db.messages.add(reply) } catch(e) { setMessages([...next,{role:'assistant',content:e instanceof Error?e.message:'请求失败',createdAt:Date.now()}]) } finally { setBusy(false) } }
-  async function saveConfig() { await db.apiConfigs.clear(); await db.apiConfigs.add(config); alert('API 配置已保存到本地') }
-  const pages=[apps.slice(0,6),apps.slice(6)]; const touchStart=useRef(0); const onTouchStart=(e:React.TouchEvent)=>{touchStart.current=e.changedTouches[0].clientX}; const onTouchEnd=(e:React.TouchEvent)=>{const delta=e.changedTouches[0].clientX-touchStart.current;if(Math.abs(delta)>45)setPage(p=>Math.max(0,Math.min(pages.length-1,p+(delta<0?1:-1))))};
-  return <main className="stage"><div className="phone"><header><span>9:41</span><b>POCKI</b><span>▮▮ 5G ◉</span></header>{active==='home' ? <><section className="desktop"><div className="widget"><strong>POCKI</strong><small>{new Date().toLocaleDateString()}</small></div><div className="page-window" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><div className="page-track" style={{transform:`translateX(-${page*100}%)`}}>{pages.map((items,pi)=><div className="page" key={pi}>{items.map(a=><button className="app-icon" key={a} onClick={()=>setActive(a)}><i>{a.slice(0,1)}</i><span>{a}</span></button>)}</div>)}</div></div><div className="page-dots">{pages.map((_,i)=><button className={i===page?'selected':''} onClick={()=>setPage(i)} key={i}>●</button>)}</div></section><div className="dock"><button onClick={()=>setActive('Chat')}>Chat</button><button onClick={()=>setActive('Diary')}>Diary</button><button onClick={()=>setActive('Settings')}>Settings</button></div></> : <section className="app"><button onClick={()=>setActive('home')}>← 桌面</button><h2>{active}</h2>{active==='Chat' && <><div className="messages">{messages.map((m,i)=><p key={i} className={m.role}>{m.content}</p>)}</div><div className="composer"><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="输入消息"/><button onClick={send}>{busy?'…':'发送'}</button></div></>}{active==='API Manager'&&<div className="form">{(['baseUrl','apiKey','model'] as const).map(k=><label key={k}>{k}<input type={k==='apiKey'?'password':'text'} value={config[k]} onChange={e=>setConfig({...config,[k]:e.target.value})}/></label>)}<button onClick={saveConfig}>保存配置</button></div>}{active!=='Chat'&&active!=='API Manager'&&<p>应用框架已建立，功能模块待接入。</p>}</section>}<div className="home-indicator" /></div></main>
-}
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
+createRoot(document.getElementById('root')!).render(<App/>)
