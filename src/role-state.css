@@ -4,3 +4,4 @@
 .role-state-strip button{border:0;border-radius:999px;padding:4px 8px;background:#fff;color:#3d8fb0;font-size:10px}
 .role-state-strip span{padding:3px 7px;border-radius:999px;background:#ffffff88}
 .relationship-history{margin-top:10px;padding:9px 10px;border-radius:14px;background:#ffffff66;border:1px solid #ffffffaa}.relationship-history>span{display:block;font-size:10px;color:#54809a;font-weight:700;margin-bottom:5px}.relationship-history small{display:block!important;margin:3px 0!important;color:#496d7d!important;font-size:10px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.role-state-card{width:100%;min-width:0;align-items:flex-start;overflow:hidden}.role-state-card .record-main{min-width:0;overflow:hidden}.role-state-card .record-main p{white-space:normal;overflow-wrap:anywhere}.role-state-card>button{flex:0 0 auto}.relationship-history{max-width:100%;overflow:hidden}
