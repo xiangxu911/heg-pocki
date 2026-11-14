@@ -4,6 +4,8 @@ export type CharacterRecord = { id?: number; name: string; avatar: string; descr
 export type MemoryRecord = { id?: number; title: string; content: string; type: string; character: string; threadId?: string; updatedAt: number }
 export type RoleStateRecord = { id: string; threadId: string; mood: string; energy: number; relationship: string; lastEvent: string; updatedAt: number }
 export type WorldbookRecord = { id?: number; title: string; keywords: string; content: string; enabled: boolean; updatedAt: number }
+type MemorySource = { id?: number; threadId?: string; role: 'user' | 'assistant'; content: string; createdAt: number }
+type MemoryCandidate = { key: string; title: string; content: string; type: string; character: string; threadId?: string; updatedAt: number }
 type Store<T> = { add(value: T): Promise<number>; put(value: T): Promise<unknown>; delete(key: number): Promise<void> }
 
 function Back({ children }: { children: React.ReactNode }) { return <section className="app feature-app"><button onClick={() => window.location.assign(window.location.pathname)}>← 桌面</button>{children}</section> }
@@ -17,14 +19,66 @@ export function Characters({ items, setItems, db }: { items: CharacterRecord[]; 
   return <Back><div className="feature-heading"><div><span className="eyebrow">AI CAST</span><h2>角色管理</h2></div><button className="primary-small" onClick={() => setEditing({ name: '', avatar: '🫧', description: '', personality: '', scenario: '', updatedAt: Date.now() })}>＋ 新建</button></div><input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索角色" /><div className="record-list">{filtered.map(item => <article className="record-card character-record" key={item.id}><div className="record-avatar">{item.avatar}</div><div className="record-main"><strong>{item.name}</strong><small>{item.description || '还没有简介'}{item.personality ? ` · ${item.personality}` : ''}</small></div><button className="ghost-small" onClick={() => setEditing(item)}>编辑</button><button className="delete-small" onClick={() => void remove(item.id)}>删除</button></article>)}{!filtered.length && <div className="empty-card">还没有角色，先创建一个属于你的角色吧。</div>}</div>{editing && <Modal title={editing.id ? '编辑角色' : '新建角色'} onClose={() => setEditing(null)}>{(['name', 'avatar', 'description', 'personality', 'scenario'] as const).map(key => <label key={key}>{key === 'name' ? '名称' : key === 'avatar' ? '头像' : key === 'description' ? '简介' : key === 'personality' ? '人格与说话风格' : '背景故事'}{key === 'description' ? <textarea rows={2} value={editing[key]} onChange={event => setEditing({ ...editing, [key]: event.target.value })} /> : key === 'personality' || key === 'scenario' ? <textarea rows={4} value={editing[key]} onChange={event => setEditing({ ...editing, [key]: event.target.value })} /> : <input value={editing[key]} onChange={event => setEditing({ ...editing, [key]: event.target.value })} />}</label>)}<button className="primary-action" onClick={() => void save()}>保存角色</button></Modal>}</Back>
 }
 
-export function Memories({ items, setItems, db }: { items: MemoryRecord[]; setItems: React.Dispatch<React.SetStateAction<MemoryRecord[]>>; db: { memories: Store<MemoryRecord> } }) {
-  const [editing, setEditing] = useState<MemoryRecord | null>(null); const [query, setQuery] = useState('')
-  const save = async () => { if (!editing?.title.trim()) return; const item = { ...editing, title: editing.title.trim(), updatedAt: Date.now() }; if (item.id) await db.memories.put(item); else item.id = await db.memories.add(item); setItems(current => current.some(x => x.id === item.id) ? current.map(x => x.id === item.id ? item : x) : [item, ...current]); setEditing(null) }
-  const remove = async (id?: number) => { if (id && confirm('删除这条记忆？')) { await db.memories.delete(id); setItems(current => current.filter(x => x.id !== id)) } }
-  const filtered = items.filter(x => `${x.title}${x.content}${x.character}${x.type}`.toLowerCase().includes(query.toLowerCase()))
-  return <Back><div className="feature-heading"><div><span className="eyebrow">MEMORY CORE</span><h2>记忆库</h2></div><button className="primary-small" onClick={() => setEditing({ title: '', content: '', type: '长期记忆', character: '', updatedAt: Date.now() })}>＋ 新建</button></div><input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索记忆" /><div className="record-list">{filtered.map(item => <article className="memory-card" key={item.id}><div className="memory-tag">{item.type}</div><strong>{item.title}</strong><small>{item.character ? `关联角色：${item.character}` : '未关联角色'}</small><p>{item.content}</p><div className="card-actions"><button className="ghost-small" onClick={() => setEditing(item)}>编辑</button><button className="delete-small" onClick={() => void remove(item.id)}>删除</button></div></article>)}{!filtered.length && <div className="empty-card">还没有记忆，重要的事情可以记在这里。</div>}</div>{editing && <Modal title={editing.id ? '编辑记忆' : '新建记忆'} onClose={() => setEditing(null)}><label>标题<input value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} /></label><label>类型<select value={editing.type} onChange={event => setEditing({ ...editing, type: event.target.value })}><option>长期记忆</option><option>短期记忆</option><option>重要事件</option><option>人物关系</option></select></label><label>关联角色<input value={editing.character} onChange={event => setEditing({ ...editing, character: event.target.value })} placeholder="可留空" /></label><label>内容<textarea rows={6} value={editing.content} onChange={event => setEditing({ ...editing, content: event.target.value })} /></label><button className="primary-action" onClick={() => void save()}>保存记忆</button></Modal>}</Back>
+export function Memories({ items, setItems, db, messages = [] }: { items: MemoryRecord[]; setItems: React.Dispatch<React.SetStateAction<MemoryRecord[]>>; db: { memories: Store<MemoryRecord> }; messages?: MemorySource[] }) {
+  const [editing, setEditing] = useState<MemoryRecord | null>(null)
+  const [query, setQuery] = useState('')
+  const [candidates, setCandidates] = useState<MemoryCandidate[]>([])
+  const [helperNotice, setHelperNotice] = useState('')
+  const save = async () => {
+    if (!editing?.title.trim()) return
+    const item = { ...editing, title: editing.title.trim(), updatedAt: Date.now() }
+    if (item.id) await db.memories.put(item)
+    else item.id = await db.memories.add(item)
+    setItems(current => current.some(x => x.id === item.id) ? current.map(x => x.id === item.id ? item : x) : [item, ...current])
+    setEditing(null)
+  }
+  const remove = async (id?: number) => {
+    if (id && confirm('删除这条记忆？')) {
+      await db.memories.delete(id)
+      setItems(current => current.filter(x => x.id !== id))
+    }
+  }
+  const scanChats = () => {
+    const keywords = /(喜欢|不喜欢|讨厌|希望|想要|不要|叫我|我是|我的|以后|生日|纪念|住在|学校|专业|过敏|不能|偏好|习惯|记得)/
+    const existing = new Set(items.map(item => item.content.trim()))
+    const found = messages
+      .filter(message => message.content.trim().length >= 8 && keywords.test(message.content) && !existing.has(message.content.trim()))
+      .slice(-30)
+      .reverse()
+      .slice(0, 6)
+      .map((message, index) => ({
+        key: String(message.id || message.createdAt) + '-' + index,
+        title: '聊天记录 · ' + new Date(message.createdAt).toLocaleDateString(),
+        content: message.content.trim(),
+        type: '待确认',
+        character: '',
+        threadId: message.threadId,
+        updatedAt: message.createdAt
+      }))
+    setCandidates(found)
+    setHelperNotice(found.length ? '找到 ' + found.length + ' 条候选，请确认后再保存' : '最近聊天里暂时没有明显的长期信息')
+  }
+  const acceptCandidate = async (candidate: MemoryCandidate) => {
+    const item: MemoryRecord = { title: candidate.title, content: candidate.content, type: '长期记忆', character: candidate.character, threadId: candidate.threadId, updatedAt: Date.now() }
+    item.id = await db.memories.add(item)
+    setItems(current => [item, ...current])
+    setCandidates(current => current.filter(value => value.key !== candidate.key))
+    setHelperNotice('已加入记忆库')
+  }
+  const filtered = items.filter(x => (x.title + x.content + x.character + x.type).toLowerCase().includes(query.toLowerCase()))
+  return <Back>
+    <div className="feature-heading"><div><span className="eyebrow">MEMORY CORE</span><h2>记忆库</h2></div><button className="primary-small" onClick={() => setEditing({ title: '', content: '', type: '长期记忆', character: '', updatedAt: Date.now() })}>＋ 新建</button></div>
+    <section className="memory-helper-card">
+      <div className="memory-helper-head"><div><span className="eyebrow">MEMORY ASSISTANT</span><h3>从聊天提取候选</h3></div><button className="primary-small" onClick={scanChats}>扫描最近聊天</button></div>
+      <p>只读取当前设备上的聊天记录，先生成候选，不会未经确认自动写入。</p>
+      {helperNotice && <small className="helper-notice">{helperNotice}</small>}
+      {candidates.map(candidate => <article className="memory-candidate" key={candidate.key}><span>待确认</span><p>{candidate.content}</p><div><button className="ghost-small" onClick={() => void acceptCandidate(candidate)}>加入长期记忆</button><button className="delete-small" onClick={() => setCandidates(current => current.filter(value => value.key !== candidate.key))}>忽略</button></div></article>)}
+    </section>
+    <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索记忆" />
+    <div className="record-list">{filtered.map(item => <article className="memory-card" key={item.id}><div className="memory-tag">{item.type}</div><strong>{item.title}</strong><small>{item.character ? '关联角色：' + item.character : '未关联角色'}</small><p>{item.content}</p><div className="card-actions"><button className="ghost-small" onClick={() => setEditing(item)}>编辑</button><button className="delete-small" onClick={() => void remove(item.id)}>删除</button></div></article>)}{!filtered.length && <div className="empty-card">还没有记忆，重要的事情可以记在这里。</div>}</div>
+    {editing && <Modal title={editing.id ? '编辑记忆' : '新建记忆'} onClose={() => setEditing(null)}><label>标题<input value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} /></label><label>类型<select value={editing.type} onChange={event => setEditing({ ...editing, type: event.target.value })}><option>长期记忆</option><option>短期记忆</option><option>重要事件</option><option>人物关系</option></select></label><label>关联角色<input value={editing.character} onChange={event => setEditing({ ...editing, character: event.target.value })} placeholder="可留空" /></label><label>内容<textarea rows={6} value={editing.content} onChange={event => setEditing({ ...editing, content: event.target.value })} /></label><button className="primary-action" onClick={() => void save()}>保存记忆</button></Modal>}
+  </Back>
 }
-
 type RoleStateStore = { put(value: RoleStateRecord): Promise<unknown>; delete(key: string): Promise<void>; toArray(): Promise<RoleStateRecord[]> }
 export function RoleStates({ db, threads }: { db: { roleStates: RoleStateStore }; threads: { id: string; name: string; avatar: string }[] }) {
   const [items, setItems] = useState<RoleStateRecord[]>([]); const [editing, setEditing] = useState<RoleStateRecord | null>(null)
